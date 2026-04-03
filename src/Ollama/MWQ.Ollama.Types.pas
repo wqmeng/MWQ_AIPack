@@ -92,6 +92,7 @@ type
     mtLlama,
     mtMistral,
     mtGemma,
+    mtTranslateGemma,
     mtRiva
   );
 
