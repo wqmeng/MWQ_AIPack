@@ -9,7 +9,6 @@ uses
 type
   TOllamaManager = class
   private
-    class var FHttpClient: THttpClient;
     class var FBaseURL: string;
     class var FActiveModels: TList<string>;
     class var FKeepAliveThread: TThread;
@@ -22,7 +21,6 @@ type
     class constructor Create;
     class destructor Destroy;
 
-    class function GetClient: THttpClient; static;
   public
     class procedure Init(const BaseURL: string); static;
 
@@ -35,27 +33,26 @@ type
 
     // --- Control ---
     class function StartModel(const ModelName: string): Boolean; static;
-
     class procedure AddActiveModel(const ModelName: string);
     class procedure RemoveActiveModel(const ModelName: string);
 
-    class procedure StartKeepAlive;   // start periodic keep-alive
-    class procedure StopKeepAlive;    // stop periodic keep-alive
+    class procedure StartKeepAlive;
+    class procedure StopKeepAlive;
     class function IsKeepAliveThreadStarted: Boolean;
   end;
 
 implementation
 
 uses
-  System.JSON;
+  System.JSON, System.SysConst, System.DateUtils;
 
 { TOllamaManager }
 
 { --- Active models management --- }
 class procedure TOllamaManager.AddActiveModel(const ModelName: string);
 begin
-  if not TOllamaManager.FActiveModels.Contains(ModelName) then
-    TOllamaManager.FActiveModels.Add(ModelName);
+  if not FActiveModels.Contains(ModelName) then
+    FActiveModels.Add(ModelName);
 end;
 
 class procedure TOllamaManager.RemoveActiveModel(const ModelName: string);
@@ -68,40 +65,50 @@ class procedure TOllamaManager.KeepAliveProc;
 var
   Model: string;
   LBody: TStringStream;
+  Client: THttpClient;
 begin
   while not FTerminateKeepAlive do
   begin
-    FKeepAliveEvent.WaitFor(5 * 60 * 1000); // 5 minutes
-    if FTerminateKeepAlive then begin
-      Break;
-    end;
-    FKeepAliveEvent.ResetEvent;
-
-    for Model in FActiveModels do
+    // Wait up to 5 minutes, or until SetEvent is called
+    if FKeepAliveEvent.WaitFor(5 * 60 * 1000) = wrSignaled then
     begin
-      try
-        LBody := TStringStream.Create(Format('{"model":"%s","prompt":"Ping","stream":false}', [Model]), TEncoding.UTF8);
+      FKeepAliveEvent.ResetEvent;
+      if FTerminateKeepAlive then
+        Break;
+    end;
+
+    Client := THttpClient.Create;
+    try
+      for Model in FActiveModels do
+      begin
         try
-          FHttpClient.Post(BuildOllamaUrl(efGenerate), LBody);
-        finally
-          LBody.Free;
+          LBody := TStringStream.Create(Format('{"model":"%s","prompt":"Ping","stream":false}', [Model]), TEncoding.UTF8);
+          try
+            Client.Post(BuildOllamaUrl(efGenerate), LBody);
+          finally
+            LBody.Free;
+          end;
+        except
+          // ignore
         end;
-      except
-        on E: Exception do
-          ; // ignore, just keep alive
       end;
+    finally
+      Client.Free;
     end;
   end;
 
-  FTerminateKeepAlive := false;  // Set thread exit flag
+  FTerminateKeepAlive := False;
 end;
 
 class procedure TOllamaManager.StartKeepAlive;
 begin
   FKeepAliveThreadStarted := True;
   if FKeepAliveThread = nil then
-    FKeepAliveThread := TThread.CreateAnonymousThread(TOllamaManager.KeepAliveProc);
-  FKeepAliveThread.Start;
+  begin
+    FKeepAliveThread := TThread.CreateAnonymousThread(KeepAliveProc);
+    FKeepAliveThread.FreeOnTerminate := False;
+    FKeepAliveThread.Start;
+  end;
 end;
 
 class procedure TOllamaManager.StopKeepAlive;
@@ -109,27 +116,25 @@ begin
   if Assigned(FKeepAliveThread) then
   begin
     FTerminateKeepAlive := True;
-    FKeepAliveEvent.SetEvent;
-    while not FTerminateKeepAlive do  // Wait until thread KeepAlive exit;
-      Sleep(1);
+    FKeepAliveEvent.SetEvent; // wake up thread immediately
+    FKeepAliveThread.WaitFor; // wait efficiently for thread to finish
+    FreeAndNil(FKeepAliveThread);
   end;
-  FKeepAliveThreadStarted := false;
+  FKeepAliveThreadStarted := False;
 end;
 
 class constructor TOllamaManager.Create;
 begin
-  FKeepAliveEvent := TLightweightEvent.Create;
-  FKeepAliveThreadStarted := false;
-  FHttpClient := THttpClient.Create;
   FActiveModels := TList<string>.Create;
-  FTerminateKeepAlive := false;
+  FKeepAliveEvent := TLightweightEvent.Create;
+  FKeepAliveThreadStarted := False;
+  FTerminateKeepAlive := False;
 end;
 
 class destructor TOllamaManager.Destroy;
 begin
   StopKeepAlive;
   FActiveModels.Free;
-  FHttpClient.Free;
   FKeepAliveEvent.Free;
 end;
 
@@ -138,26 +143,27 @@ begin
   FBaseURL := BaseURL;
 end;
 
-class function TOllamaManager.GetClient: THttpClient;
-begin
-  if FHttpClient = nil then
-    FHttpClient := THttpClient.Create;
-  Result := FHttpClient;
-end;
-
+{ --- Server --- }
 class function TOllamaManager.IsServerRunning: Boolean;
 var
   Resp: IHTTPResponse;
+  Client: THttpClient;
 begin
   Result := False;
+  Client := THttpClient.Create;
   try
-    Resp := FHttpClient.Get(BuildOllamaUrl('api/version'));
-    Result := Resp.StatusCode = 200;
-  except
-    Result := False;
+    try
+      Resp := Client.Get(BuildOllamaUrl('api/version'));
+      Result := Assigned(Resp) and (Resp.StatusCode = 200);
+    except
+      Result := False;
+    end;
+  finally
+    Client.Free;
   end;
 end;
 
+{ --- Models --- }
 class function TOllamaManager.GetModelsList: TArray<string>;
 var
   Resp: IHTTPResponse;
@@ -165,82 +171,97 @@ var
   JsonArr: TJSONArray;
   I: Integer;
   Item: TJSONObject;
+  Client: THttpClient;
 begin
   SetLength(Result, 0);
+  Client := THttpClient.Create;
   try
-    Resp := FHttpClient.Get(BuildOllamaUrl(OLLAMA_API_TAGS));
-    if (Resp = nil) or (Resp.StatusCode <> 200) then
-      Exit;
-
-    JsonObj := TJSONObject.ParseJSONValue(Resp.ContentAsString) as TJSONObject;
     try
-      if JsonObj = nil then Exit;
+      Resp := Client.Get(BuildOllamaUrl(OLLAMA_API_TAGS));
+      if (Resp = nil) or (Resp.StatusCode <> 200) then Exit;
 
-      JsonArr := JsonObj.GetValue<TJSONArray>('models'); // <- changed from 'tags'
-      if JsonArr = nil then Exit;
+      JsonObj := TJSONObject.ParseJSONValue(Resp.ContentAsString) as TJSONObject;
+      try
+        if JsonObj = nil then Exit;
+        JsonArr := JsonObj.GetValue<TJSONArray>('models');
+        if JsonArr = nil then Exit;
 
-      SetLength(Result, JsonArr.Count);
-      for I := 0 to JsonArr.Count - 1 do
-      begin
-        Item := JsonArr.Items[I] as TJSONObject;
-        if Assigned(Item) then
-          Result[I] := Item.GetValue<string>('name'); // <- get model name
+        SetLength(Result, JsonArr.Count);
+        for I := 0 to JsonArr.Count - 1 do
+        begin
+          Item := JsonArr.Items[I] as TJSONObject;
+          if Assigned(Item) then
+            Result[I] := Item.GetValue<string>('name');
+        end;
+      finally
+        JsonObj.Free;
       end;
-    finally
-      JsonObj.Free;
+    except
+      // ignore
     end;
-  except
-    // optionally log the exception
+  finally
+    Client.Free;
   end;
-end;
-
-class function TOllamaManager.IsKeepAliveThreadStarted: Boolean;
-begin
-  Result := TOllamaManager.FKeepAliveThreadStarted;
 end;
 
 class function TOllamaManager.IsModelActive(const ModelName: string): Boolean;
 var
   Resp: IHTTPResponse;
   JsonObj: TJSONObject;
+  Client: THttpClient;
 begin
   Result := False;
+  Client := THttpClient.Create;
   try
-    Resp := FHttpClient.Get(BuildOllamaUrl(OLLAMA_API_PS));
-    if Resp.StatusCode <> 200 then Exit;
-
-    JsonObj := TJSONObject.ParseJSONValue(Resp.ContentAsString) as TJSONObject;
     try
-      if JsonObj = nil then Exit;
-      Result := JsonObj.GetValue(ModelName) <> nil;
-    finally
-      JsonObj.Free;
+      Resp := Client.Get(BuildOllamaUrl(OLLAMA_API_PS));
+      if (Resp = nil) or (Resp.StatusCode <> 200) then Exit;
+
+      JsonObj := TJSONObject.ParseJSONValue(Resp.ContentAsString) as TJSONObject;
+      try
+        if JsonObj = nil then Exit;
+        Result := JsonObj.GetValue(ModelName) <> nil;
+      finally
+        JsonObj.Free;
+      end;
+    except
+      Result := False;
     end;
-  except
+  finally
+    Client.Free;
   end;
 end;
 
 class function TOllamaManager.StartModel(const ModelName: string): Boolean;
 var
-  Resp: IHTTPResponse;
   LBody: TStringStream;
+  Resp: IHTTPResponse;
+  Client: THttpClient;
   DummyPrompt: string;
 begin
   Result := False;
-
-  // Send a tiny prompt just to load the model
   DummyPrompt := '{"model":"' + ModelName + '","prompt":"Hello","stream":false}';
-  LBody := TStringStream.Create(DummyPrompt, TEncoding.UTF8);
+  Client := THttpClient.Create;
   try
+    LBody := TStringStream.Create(DummyPrompt, TEncoding.UTF8);
     try
-      Resp := FHttpClient.Post(BuildOllamaUrl(efGenerate), LBody);
-      Result := Resp.StatusCode = 200;
-    except
-      Result := False;
+      try
+        Resp := Client.Post(BuildOllamaUrl(efGenerate), LBody);
+        Result := Assigned(Resp) and (Resp.StatusCode = 200);
+      except
+        Result := False;
+      end;
+    finally
+      LBody.Free;
     end;
   finally
-    LBody.Free;
+    Client.Free;
   end;
+end;
+
+class function TOllamaManager.IsKeepAliveThreadStarted: Boolean;
+begin
+  Result := FKeepAliveThreadStarted;
 end;
 
 end.
