@@ -149,7 +149,6 @@ var
   Resp: IHTTPResponse;
   Client: THttpClient;
 begin
-  Result := False;
   Client := THttpClient.Create;
   try
     try
@@ -239,7 +238,6 @@ var
   Client: THttpClient;
   DummyPrompt: string;
 begin
-  Result := False;
   DummyPrompt := '{"model":"' + ModelName + '","prompt":"Hello","stream":false}';
   Client := THttpClient.Create;
   try

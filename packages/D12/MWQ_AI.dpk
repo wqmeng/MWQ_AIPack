@@ -28,12 +28,26 @@ package MWQ_AI;
 {$IMPLICITBUILD ON}
 
 requires
-  rtl;
+  rtl,
+  spring.base,
+  Neslib,
+  Neslib_Json,
+  QuickLogger_D12;
 
 contains
   MWQ.Ollama.PromptBuilder in '..\..\src\Ollama\MWQ.Ollama.PromptBuilder.pas',
   MWQ.Ollama.ResponseParser in '..\..\src\Ollama\MWQ.Ollama.ResponseParser.pas',
   MWQ.Ollama.Types in '..\..\src\Ollama\MWQ.Ollama.Types.pas',
-  MWQ.Ollama.Manager in '..\..\src\Ollama\MWQ.Ollama.Manager.pas';
+  MWQ.Ollama.Manager in '..\..\src\Ollama\MWQ.Ollama.Manager.pas',
+  MWQ.LLM.Manager in '..\..\src\MWQ.LLM.Manager.pas',
+  MWQ.LLM.ModelDetector in '..\..\src\MWQ.LLM.ModelDetector.pas',
+  MWQ.LLM.PromptBuilder in '..\..\src\MWQ.LLM.PromptBuilder.pas',
+  MWQ.LLM.ResponseParser in '..\..\src\MWQ.LLM.ResponseParser.pas',
+  MWQ.LLM.Types in '..\..\src\MWQ.LLM.Types.pas',
+  MWQ.LLM.Provider.Factory in '..\..\src\Providers\MWQ.LLM.Provider.Factory.pas',
+  MWQ.LLM.Provider.LMStudio in '..\..\src\Providers\MWQ.LLM.Provider.LMStudio.pas',
+  MWQ.LLM.Provider.Ollama in '..\..\src\Providers\MWQ.LLM.Provider.Ollama.pas',
+  MWQ.LLM.Provider in '..\..\src\Providers\MWQ.LLM.Provider.pas',
+  MWQ.LLM.Model.Translate in '..\..\src\MWQ.LLM.Model.Translate.pas';
 
 end.
