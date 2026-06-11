@@ -46,7 +46,8 @@ type
       const AModel: string;
       const AMessages: TMessageArray;
       const SysPrompt, UserPrompt: string;
-      AStream: Boolean
+      AStream: Boolean;
+      const AConfig: TLLMGenerationConfig
     ): string; static;
 
     // helpers
@@ -230,7 +231,8 @@ class function TLLMPromptBuilder.BuildPayload(
   const AModel: string;
   const AMessages: TMessageArray;
   const SysPrompt, UserPrompt: string;
-  AStream: Boolean
+  AStream: Boolean;
+  const AConfig: TLLMGenerationConfig
 ): string;
 var
   P: string;
@@ -251,7 +253,7 @@ begin
       else
         Msgs := AMessages;
 
-      Exit(BuildOpenAIChat(AModel, Msgs, AStream));
+      Exit(BuildOpenAIChat(AModel, Msgs, AStream, AConfig.MaxTokens, AConfig.Temperature));
     end;
 
     efInstruction:
@@ -405,7 +407,7 @@ var
   prompt: string;
 begin
   prompt :=
-    SrcCode + '¡ú' + DstCode + ':' + Text;
+    SrcCode + 'ï¿½ï¿½' + DstCode + ':' + Text;
 
   Result :=
     '{' +

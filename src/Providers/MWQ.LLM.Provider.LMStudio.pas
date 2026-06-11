@@ -240,6 +240,7 @@ var
   ModelInfo: TLLMModelInfo;
   ParsedContent: string;
   ErrorMsg: string;
+  LConfig: TLLMGenerationConfig;
 begin
   Result := TLLMResult.Fail('init');
 
@@ -258,19 +259,25 @@ begin
   end
   else
   begin
+    LConfig := Default(TLLMGenerationConfig);
+    LConfig.MaxTokens := 2048;
+    LConfig.Temperature := 0;
+    LConfig.TopP := 1;
+    
     Payload :=
       TLLMPromptBuilder.BuildPayload(
-        efGenerate,
+        efOpenAIChat,
         AModel,
         nil,
         '',
         TLLMPromptBuilder.BuildTranslatePrompt(
           ModelInfo, Text, SrcCode, DstCode, SrcName, DstName
         ),
-        False
+        False,
+        LConfig 
       );
 
-    RawResult := InternalExecute(AModel, Payload, efGenerate);
+    RawResult := InternalExecute(AModel, Payload, efOpenAIChat);
   end;
 
   // --------------------------------------------------
@@ -279,7 +286,7 @@ begin
   if not TLLMResponseParser.Parse(
     ModelInfo,
     RawResult.Raw,
-    efGenerate,
+    efOpenAIChat,
     ParsedContent,
     ErrorMsg
   ) then

@@ -27,6 +27,15 @@ type
       efRaw // caller provides everything
   );
 
+  TLLMGenerationConfig = record
+    Temperature: Double;
+    MaxTokens: Integer;
+    TopP: Double;
+    Seed: Integer;
+    PresencePenalty: Double;
+    FrequencyPenalty: Double;
+  end;
+
 const
   EndpointFlavorNames: array[TEndpointFlavor] of string = (
       'efGenerate',

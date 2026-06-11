@@ -251,6 +251,7 @@ var
   ModelInfo: TLLMModelInfo;
   Endpoint: TEndpointFlavor;
   Content, Err: string;
+  LConfig: TLLMGenerationConfig;
 begin
   Result := TLLMResult.Fail('');
 
@@ -276,6 +277,11 @@ begin
     DstName
   );
 
+  LConfig := Default(TLLMGenerationConfig);
+  LConfig.MaxTokens := 2048;
+  LConfig.Temperature := 0;
+  LConfig.TopP := 1;
+  
   // --------------------------------------------------
   // 3. build payload
   // --------------------------------------------------
@@ -288,7 +294,8 @@ begin
         nil,
         '',
         Prompt,
-        False
+        False,
+        LConfig
       );
 
     efChat:
@@ -298,7 +305,8 @@ begin
         TLLMPromptBuilder.MakeMessages(['user', Prompt]),
         '',
         '',
-        False
+        False,
+        LConfig
       );
 
   else

@@ -11,6 +11,7 @@ type
   private
     class function JsonUnescape(const S: string): string; static;
     class function ExtractError(const Text: string; var ErrorMsg: string): Boolean; static;
+    class function IsLikelyJson(const S: string): Boolean; static;
   public
     class function Parse(
         const ModelInfo: TLLMModelInfo;
@@ -65,6 +66,15 @@ begin
   end;
 end;
 
+class function TLLMResponseParser.IsLikelyJson(const S: string): Boolean;
+var
+  T: string;
+begin
+  T := Trim(S);
+
+  Result := (T <> '') and ((T[1] = '{') or (T[1] = '['));
+end;
+
 class function TLLMResponseParser.Parse(
     const ModelInfo: TLLMModelInfo;
     const Raw: string;
@@ -84,14 +94,35 @@ begin
     Exit(False);
   end;
 
+  //
+  // VERY IMPORTANT
+  //
+
+  if not IsLikelyJson(Raw) then begin
+
+    if Pos('Internal Server Error', Raw) > 0 then
+      ErrorMsg := 'HTTP 500 Internal Server Error'
+    else if Pos('<html', LowerCase(Raw)) > 0 then
+      ErrorMsg := 'Server returned HTML instead of JSON'
+    else
+      ErrorMsg := Copy(Raw, 1, 256);
+
+    Exit(False);
+  end;
+
   // ------------------------------------
   // 1. Try parse error first
   // ------------------------------------
   if ExtractError(Raw, ErrorMsg) then
     Exit(False);
-
   try
     Doc := TJsonDocument.Parse(Raw);
+
+    if Doc = nil then begin
+      ErrorMsg := 'Parse error: Doc = nil';
+      Exit(false);
+    end;
+
     Root := Doc.Root;
 
     // ------------------------------------
